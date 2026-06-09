@@ -1,0 +1,94 @@
+{
+  "expo": {
+    "name": "Addvey",
+    "slug": "addvery",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "light",
+    "newArchEnabled": true,
+    "jsEngine": "hermes",
+    "splash": {
+      "image": "./assets/splash-icon.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#ffffff"
+    },
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.Addvey.app",
+      "infoPlist": {
+        "NSCameraUsageDescription": "This app uses the camera to scan QR codes.",
+        "NSMicrophoneUsageDescription": "This app uses the microphone for voice search.",
+        "NSSpeechRecognitionUsageDescription": "This app uses speech recognition to search by voice."
+      },
+      "config": {
+        "googleMapsApiKey": "AIzaSyDgFGS91BvviXh_f-nmvtEggUHJcaGyUwC"
+      }
+    },
+    "android": {
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/icon.png",
+        "backgroundColor": "#ffffff"
+      },
+      "config": {
+        "googleMaps": {
+          "apiKey": "AIzaSyDgFGS91BvviXh_f-nmvtEggUHJcaGyUwC"
+        }
+      },
+      "edgeToEdgeEnabled": true,
+      "predictiveBackGestureEnabled": false,
+      "package": "com.govind.Addvey",
+      "permissions": [
+        "android.permission.CAMERA",
+        "android.permission.ACCESS_FINE_LOCATION",
+        "android.permission.ACCESS_COARSE_LOCATION",
+        "android.permission.READ_EXTERNAL_STORAGE",
+        "android.permission.WRITE_EXTERNAL_STORAGE",
+        "android.permission.ACCESS_MEDIA_LOCATION",
+        "android.permission.READ_MEDIA_VISUAL_USER_SELECTED",
+        "android.permission.READ_MEDIA_IMAGES",
+        "android.permission.READ_MEDIA_VIDEO",
+        "android.permission.READ_MEDIA_AUDIO",
+        "android.permission.RECORD_AUDIO"
+      ]
+    },
+    "web": {
+      "favicon": "./assets/favicon.png"
+    },
+    "plugins": [
+      "expo-font",
+      [
+        "expo-build-properties",
+        {
+          "android": {
+            "kotlinVersion": "2.1.20"
+          }
+        }
+      ],
+      "./plugins/withAndroidJvmTarget.js",
+      [
+        "./plugins/withTruecaller.js",
+        {
+          "androidPartnerKey": "lgkmllphjqoeconxfydfrawx-bxjeleqxn1mzfcp2og",
+          "iosAppKey": "YOUR_IOS_APP_KEY",
+          "iosAppLink": "YOUR_IOS_APP_LINK"
+        }
+      ],
+      "expo-speech-recognition",
+      "expo-web-browser"
+    ],
+    "assetBundlePatterns": [
+      "**/*"
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "504e9900-5ad2-44f3-9e65-e4632304959d"
+      }
+    },
+    "runtimeVersion": "1.0.0",
+    "updates": {
+      "enabled": false
+    },
+    "owner": "xynodev"
+  }
+}
