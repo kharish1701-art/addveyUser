@@ -1,13 +1,12 @@
 // govind sir ui
 
 // screens/AddReviewScreen.tsx
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
   View,
   Text,
   StyleSheet,
   Image,
-  SafeAreaView,
   TouchableOpacity,
   FlatList,
   Dimensions,
@@ -16,7 +15,11 @@ import {
   Alert,
   Linking,
   Share,
+  TextInput,
+  NativeSyntheticEvent,
+  NativeScrollEvent,
 } from "react-native";
+import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import {
   Ionicons,
   Entypo,
@@ -58,12 +61,29 @@ import InfoReportScreen from "../Components/Chat/InfoReportScreen";
 import ReportDetailModal from "../Components/Profile/ReportDetailModal";
 import RecentCard from "../Components/MainHome/RecentCard";
 import { useFavorites } from "../context/FavoritesContext";
+import { formatDate } from "../Components/helper/FormatDate";
 
 const { width } = Dimensions.get("window");
-// Replace with your custom images (local or remote)
+
+type PreviewTab = "Details" | "Description" | "Nearby";
+
+const getAttributeIcon = (key: string) => {
+  const k = key.toLowerCase();
+  if (k.includes("fuel") || k === "rc") return "gas-station";
+  if (k.includes("km") || k.includes("mileage")) return "speedometer";
+  if (k.includes("gear") || k.includes("transmission")) return "car-shift-pattern";
+  if (k.includes("owner") || k.includes("listed")) return "account";
+  if (k.includes("seat") || k.includes("airbag")) return "car-seat";
+  if (k.includes("safety") || k.includes("star") || k.includes("rating")) return "star";
+  if (k.includes("insurance")) return "shield-check";
+  if (k.includes("condition")) return "car-info";
+  if (k.includes("age")) return "calendar-clock";
+  return "information-outline";
+};
 
 const AddReviewScreen: React.FC = () => {
   const navigation = useNavigation<any>();
+  const insets = useSafeAreaInsets();
   const { isFavorite, toggleFavorite } = useFavorites();
   const route = useRoute();
   const data = route?.params?.data;
@@ -97,6 +117,12 @@ const AddReviewScreen: React.FC = () => {
   const [reportModat, setReportModal] = useState(false);
   const [modalVisible, setModalVisible] = useState(false);
   const [similarProducts, setSimilarProducts] = useState<any[]>([]);
+  const [activeTab, setActiveTab] = useState<PreviewTab>("Details");
+  const [showStickyHeader, setShowStickyHeader] = useState(false);
+  const scrollRef = useRef<ScrollView>(null);
+  const scrollContentRef = useRef<View>(null);
+  const sellerMarkerRef = useRef<View>(null);
+  const [sellerThreshold, setSellerThreshold] = useState(0);
 
   // Effects
   useEffect(() => {
@@ -150,18 +176,22 @@ const AddReviewScreen: React.FC = () => {
   };
 
   const handleAddView = async () => {
-    setLoading(true);
     const userToken = await AsyncStorage.getItem("authToken");
-    const url = EndPoints.addViewHistory + data?.id;
-    const url1 = EndPoints.viewProdict + `${data?.id}`;
+    const viewUrl = EndPoints.addViewHistory + data?.id;
+    const productUrl = EndPoints.viewProdict + `${data?.id}`;
 
-    // Fetch Product Details (includes similarProducts)
-    const productRes = await getApi(url1, setLoading, userToken, true);
-    if (productRes?.success) {
-      setSimilarProducts(productRes?.data?.similarProducts || []);
+    try {
+      const [productRes] = await Promise.all([
+        getApi(productUrl, undefined, userToken, true),
+        getApi(viewUrl, undefined, userToken),
+      ]);
+
+      if (productRes?.success) {
+        setSimilarProducts(productRes?.data?.similarProducts || []);
+      }
+    } catch (error) {
+      console.error("Error loading product details:", error);
     }
-
-    await getApi(url, setLoading, userToken);
   };
 
   const handleSocialLinkPress = async (url) => {
@@ -226,73 +256,216 @@ const AddReviewScreen: React.FC = () => {
     }
   };
 
-  return (
-    <SafeAreaView style={styles.container}>
-      <StatusBar barStyle="dark-content" backgroundColor="#fff" />
-      {/* {loading && <LoadingModal />} */}
-      {/* Top Bar */}
-      <View style={styles.topBar}>
-        <TouchableOpacity
-          style={{ marginRight: wp("2%") }}
-          onPress={() => navigation.goBack()}
-        >
-          <Ionicons name="arrow-back" size={wp("5%")} color="#333" />
-        </TouchableOpacity>
+  const openMaps = useCallback(() => {
+    const city = data?.location?.city;
+    if (city) {
+      const url = `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(city)}`;
+      Linking.openURL(url).catch((err) => console.error("An error occurred", err));
+    } else {
+      Alert.alert("Error", "Location not available");
+    }
+  }, [data]);
 
-        {/* Title + SimpleText + Promote */}
-        <View style={styles.titleWrapper}>
-          <View>
-            <Text style={styles.topBarTitle}>Ad Preview</Text>
-            <Text style={styles.simpleText}>AD ID : {data?.id}</Text>
-          </View>
+  const distanceLabel =
+    data?.distance != null ? `${data.distance}` : "1.2";
 
-          {/* <TouchableOpacity style={styles.actionButton}>
-            <Text style={styles.actionButtonText}>Verification Pending</Text>
-          </TouchableOpacity> */}
-        </View>
+  const renderStatAction = (
+    key: string,
+    icon: React.ReactNode,
+    label: string,
+    onPress?: () => void,
+    labelStyle?: object
+  ) => (
+    <TouchableOpacity
+      key={key}
+      style={styles.statActionItem}
+      activeOpacity={onPress ? 0.75 : 1}
+      onPress={onPress}
+      disabled={!onPress}
+    >
+      <View style={styles.statActionCircle}>{icon}</View>
+      <Text style={[styles.statActionLabel, labelStyle]} numberOfLines={1}>
+        {label}
+      </Text>
+    </TouchableOpacity>
+  );
 
-        {/* Right side trash icon */}
-        {/* <TouchableOpacity>
-          <Ionicons name="trash-outline" size={wp("5%")} color="#FF0303" />
-        </TouchableOpacity> */}
-      </View>
+  const imageCount = data?.images?.length || 1;
+  const categoryName =
+    data?.subsubcategory?.name || data?.supersubcategory?.name || "Category";
+  const categoryImage =
+    data?.subsubcategory?.image || data?.supersubcategory?.image || "";
+  const formattedPrice = Number(data?.price || 0).toLocaleString("en-IN");
+  const attributeEntries = Object.entries(data?.attributes || {});
+  const gridAttributes = attributeEntries.slice(0, 6);
+  const showNearbyTab = [4, 5].includes(
+    data?.supersubcategory?.parent?.parentCategory?.id
+  );
+  const previewTabs: PreviewTab[] = showNearbyTab
+    ? ["Details", "Description", "Nearby"]
+    : ["Details", "Description"];
 
-      <ScrollView showsVerticalScrollIndicator={false}>
-        {/* Subtitle Section (2 lines) */}
-        <View style={styles.subtitleSection}>
-          {/* Top line: Nanda + icon */}
+  const measureScrollThresholds = useCallback(() => {
+    if (!scrollContentRef.current || !sellerMarkerRef.current) return;
+    sellerMarkerRef.current.measureLayout(
+      scrollContentRef.current,
+      (_x, y) => setSellerThreshold(y),
+      () => {}
+    );
+  }, []);
+
+  const handleScroll = useCallback(
+    (event: NativeSyntheticEvent<NativeScrollEvent>) => {
+      const scrollY = event.nativeEvent.contentOffset.y;
+      setShowStickyHeader((prev) => {
+        if (sellerThreshold <= 0) return false;
+        const showAt = sellerThreshold - insets.top - hp(0.3);
+        const hideAt = sellerThreshold - insets.top - hp(1.2);
+        if (!prev && scrollY >= showAt) return true;
+        if (prev && scrollY < hideAt) return false;
+        return prev;
+      });
+    },
+    [sellerThreshold, insets.top]
+  );
+
+  const scrollToTop = () => {
+    scrollRef.current?.scrollTo({ y: 0, animated: true });
+    setShowStickyHeader(false);
+  };
+
+  const renderTabBar = (inSticky = false) => (
+    <View style={[styles.tabBar, inSticky && styles.tabBarSticky]}>
+      {previewTabs.map((tab) => {
+        const isActive = activeTab === tab;
+        return (
           <TouchableOpacity
-            style={styles.subtitleTop}
-            onPress={() =>
-              navigation.navigate("ProfileScreenMainYou", { data: data })
-            }
+            key={tab}
+            style={styles.tabItem}
+            onPress={() => setActiveTab(tab)}
           >
-            <Text style={styles.subtitleText}>
-              {data?.creator?.profile?.name || "User"}
+            <Text style={[styles.tabText, isActive && styles.tabTextActive]}>
+              {tab}
             </Text>
-            <Image
-              source={require("../../assets/images/save.png")}
-              style={styles.saveimage}
-            />
+            {isActive && <View style={styles.tabIndicator} />}
           </TouchableOpacity>
+        );
+      })}
+      <TouchableOpacity style={styles.scrollTopBtn} onPress={scrollToTop}>
+        <Ionicons name="arrow-up" size={18} color="#6C63FF" />
+      </TouchableOpacity>
+    </View>
+  );
 
-          {/* Bottom line: icon + text + icon + text */}
-          <View style={styles.subtitleBottom}>
-            <Entypo name="location-pin" size={wp("4%")} color="red" />
-            <Text style={styles.locationText}>
-              {/* 1.2 km away . */}
-              {data?.location?.city}
+  return (
+    <SafeAreaView style={styles.container} edges={["bottom"]}>
+      <StatusBar barStyle="dark-content" backgroundColor="#fff" />
+
+      {showStickyHeader && (
+        <View style={[styles.stickyHeader, { paddingTop: insets.top }]}>
+          <View style={styles.stickySearchRow}>
+                <TouchableOpacity onPress={() => navigation.goBack()}>
+                  <MaterialIcons name="arrow-back-ios" size={16} color="#FF0303" />
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={styles.stickySearchInputWrap}
+                  activeOpacity={0.9}
+                  onPress={() => navigation.navigate("BuySellSearch")}
+                >
+                  <Feather name="search" size={16} color="#999" />
+                  <TextInput
+                    placeholder={`Search nearby "${categoryName}"`}
+                    placeholderTextColor="#999"
+                    style={styles.stickySearchInput}
+                    editable={false}
+                    pointerEvents="none"
+                  />
+                  <View style={styles.stickySearchDivider} />
+                  <Image
+                    source={require("../../assets/images/mic.png")}
+                    style={styles.stickyMicIcon}
+                  />
+                </TouchableOpacity>
+                <TouchableOpacity
+                  onPress={() => navigation.navigate("QRCodeScanner")}
+                >
+                  <MaterialIcons name="qr-code-scanner" size={wp(6)} color="#000" />
+                </TouchableOpacity>
+              </View>
+
+              <View style={styles.stickyProfileRow}>
+                <TouchableOpacity
+                  style={styles.stickyProfileTouch}
+                  activeOpacity={0.9}
+                  onPress={() =>
+                    navigation.navigate("ProfileScreenMainYou", { data })
+                  }
+                >
+                  <Image
+                    source={
+                      data?.creator?.profile?.image
+                        ? {
+                            uri: data.creator.profile.image.startsWith("http")
+                              ? data.creator.profile.image
+                              : IMAGE_BASE_URL + data.creator.profile.image,
+                          }
+                        : require("../../assets/images/slidbike.jpeg")
+                    }
+                    style={styles.stickyAvatar}
+                  />
+                  <View style={styles.stickyProfileInfo}>
+                    <View style={styles.sellerNameRow}>
+                      <Text style={styles.stickyName} numberOfLines={1}>
+                        {data?.creator?.profile?.name || "User"}
+                      </Text>
+                      <Text style={styles.ownerLabel}>Owner</Text>
+                      <Image
+                        source={require("../../assets/images/save.png")}
+                        style={styles.verifiedIcon}
+                      />
+                    </View>
+                    <View style={styles.sellerLocationRow}>
+                      <Entypo name="location-pin" size={wp(3)} color="#FF0303" />
+                      <Text style={styles.stickyLocation} numberOfLines={1}>
+                        {data?.location?.city}
+                      </Text>
+                    </View>
+                  </View>
+                </TouchableOpacity>
+                <TouchableOpacity style={styles.stickyNavBtn} onPress={openMaps}>
+                  <MaterialCommunityIcons
+                    name="navigation-variant"
+                    size={18}
+                    color="#6C63FF"
+                  />
+                </TouchableOpacity>
+              </View>
+
+          <View style={styles.stickyTitleRow}>
+            <Text style={styles.stickyProductTitle} numberOfLines={1}>
+              {data?.name}
             </Text>
-
-            {/* <Image
-              source={require("../../assets/images/save2.png")}
-              style={styles.saveimage}
-            /> */}
+            <Text style={styles.stickyProductPrice}>₹ {formattedPrice}</Text>
           </View>
-        </View>
 
-        {/* Image Slider */}
-        <View style={styles.sliderWrapper}>
+          {renderTabBar(true)}
+        </View>
+      )}
+
+      <ScrollView
+        ref={scrollRef}
+        showsVerticalScrollIndicator={false}
+        contentContainerStyle={{ paddingBottom: hp(10) }}
+        onScroll={handleScroll}
+        scrollEventThrottle={16}
+      >
+        <View
+          ref={scrollContentRef}
+          collapsable={false}
+          onLayout={measureScrollThresholds}
+        >
+        {/* Hero image slider */}
+        <View style={styles.heroSection}>
           <FlatList
             data={data?.images}
             horizontal
@@ -305,13 +478,43 @@ const AddReviewScreen: React.FC = () => {
                     ? { uri: IMAGE_BASE_URL + item }
                     : item
                 }
-                style={styles.image}
+                style={styles.heroImage}
               />
             )}
             showsHorizontalScrollIndicator={false}
             onViewableItemsChanged={onViewableItemsChanged}
           />
-          {/* Slider dots */}
+
+          <View style={[styles.heroTopBar, { paddingTop: insets.top + hp(0.8) }]}>
+            <TouchableOpacity
+              style={styles.heroCircleBtn}
+              onPress={() => navigation.goBack()}
+            >
+              <Ionicons name="chevron-back" size={22} color="#000" />
+            </TouchableOpacity>
+
+            <View style={styles.heroTopRight}>
+              <TouchableOpacity
+                style={[styles.heroCircleBtn, { marginRight: wp(2.5) }]}
+                onPress={() => navigation.navigate("QRCodeScanner")}
+              >
+                <MaterialIcons name="qr-code-scanner" size={22} color="#000" />
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.heroCircleBtn}
+                onPress={() => navigation.navigate("BuySellSearch")}
+              >
+                <Ionicons name="search" size={22} color="#000" />
+              </TouchableOpacity>
+            </View>
+          </View>
+
+          <View style={styles.pageBadge}>
+            <Text style={styles.pageBadgeText}>
+              {currentIndex + 1}/{imageCount}
+            </Text>
+          </View>
+
           <View style={styles.dotsContainer}>
             {data?.images?.map((_, index) => (
               <View
@@ -320,158 +523,214 @@ const AddReviewScreen: React.FC = () => {
               />
             ))}
           </View>
-
-          {/* Top-right icons */}
-          <View style={styles.topRightIcons}>
-            {/* <TouchableOpacity style={styles.iconButton}>
-              <Ionicons
-                name="trash-outline"
-                size={wp("4.5%")}
-                color="#FF0303"
-              />
-            </TouchableOpacity> */}
-            {/* <TouchableOpacity style={styles.iconButton}>
-              <Feather name="camera" size={wp("4.5%")} color="#6C63FF" />
-            </TouchableOpacity> */}
-            <TouchableOpacity
-              style={styles.rowIcon}
-              onPress={handleFavoritePress}
-            >
-              {/* <EvilIcons name="heart" size={24} color="white" /> */}
-              <MaterialCommunityIcons
-                name={isFavorite(data?.id) ? "cards-heart" : "cards-heart-outline"}
-                size={24}
-                color={isFavorite(data?.id) ? "red" : "white"}
-              />
-              <Text style={styles.iconText}>{data?.likes}</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={styles.rowIcon} onPress={handleShare}>
-              <Feather
-                name="share"
-                size={16}
-                style={{ marginLeft: wp(3) }}
-                color="white"
-              />
-              <Text style={styles.iconText}>{data?.shares}</Text>
-            </TouchableOpacity>
-          </View>
-
-          {/* Bottom-right icons with text */}
-          <View style={styles.bottomRight}></View>
-
-          {/* Bottom-left views */}
-          <View style={styles.bottomLeft}>
-            <Ionicons name="eye-outline" size={wp("4%")} color="#fff" />
-            <Text style={styles.iconText}>{data?.views}</Text>
-          </View>
         </View>
 
-        {/* Details Section */}
-        <View style={styles.detailsCard}>
-          {/* Row 1 */}
-          <View style={styles.detailRowCustom}>
-            <View style={styles.leftBox}>
+        {/* Stats action row */}
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={styles.statsActionRow}
+        >
+          {renderStatAction(
+            "views",
+            <Ionicons name="eye-outline" size={hp(2.2)} color="#000" />,
+            String(data?.views ?? 0)
+          )}
+          {renderStatAction(
+            "likes",
+            <Ionicons
+              name={isFavorite(data?.id) ? "heart" : "heart-outline"}
+              size={hp(2.2)}
+              color="#FF0303"
+            />,
+            String(data?.likes ?? 0),
+            handleFavoritePress
+          )}
+          {renderStatAction(
+            "shares",
+            <Ionicons name="share-social-outline" size={hp(2.2)} color="#6C63FF" />,
+            String(data?.shares ?? 0),
+            handleShare
+          )}
+          {renderStatAction(
+            "distance",
+            <MaterialCommunityIcons
+              name="navigation-variant"
+              size={hp(2.2)}
+              color="#6C63FF"
+            />,
+            `${distanceLabel} km`,
+            openMaps,
+            styles.statActionLabelBlue
+          )}
+          {renderStatAction(
+            "report",
+            <Ionicons name="warning-outline" size={hp(2.2)} color="#FF0303" />,
+            "Report",
+            () => setReportModal(true),
+            styles.statActionLabelRed
+          )}
+        </ScrollView>
+
+        {/* Seller card */}
+        <TouchableOpacity
+          style={styles.sellerCard}
+          activeOpacity={0.9}
+          onPress={() =>
+            navigation.navigate("ProfileScreenMainYou", { data: data })
+          }
+        >
+          <View style={styles.sellerBadge}>
+            <Text style={styles.sellerBadgeText}>Seller</Text>
+          </View>
+
+          <Image
+            source={
+              data?.creator?.profile?.image
+                ? {
+                    uri: data.creator.profile.image.startsWith("http")
+                      ? data.creator.profile.image
+                      : IMAGE_BASE_URL + data.creator.profile.image,
+                  }
+                : require("../../assets/images/slidbike.jpeg")
+            }
+            style={styles.sellerAvatar}
+          />
+
+          <View style={styles.sellerInfo}>
+            <View style={styles.sellerNameRow}>
+              <Text style={styles.sellerName} numberOfLines={1}>
+                {data?.creator?.profile?.name || "User"}
+              </Text>
+              <Text style={styles.ownerLabel}>Owner</Text>
               <Image
-                source={{ uri: IMAGE_BASE_URL + (data?.subsubcategory?.image || "") }}
-                style={{ width: wp(5), height: hp(5), objectFit: "contain" }}
+                source={require("../../assets/images/save.png")}
+                style={styles.verifiedIcon}
               />
-              <Text style={styles.detailTextCar}>
-                {data?.subsubcategory?.name || "Category"}
+            </View>
+            <View style={styles.sellerLocationRow}>
+              <Entypo name="location-pin" size={wp(3.5)} color="#FF0303" />
+              <Text style={styles.sellerLocationText} numberOfLines={1}>
+                {distanceLabel} km away . {data?.location?.city}
               </Text>
             </View>
-            <Text style={styles.rightTextCar}>29 JUL 2024</Text>
           </View>
 
-          {/* Row 2 */}
-          <View style={styles.detailRowCustom}>
-            <View style={styles.leftBox}>
-              <Text style={styles.detailText}>{data?.name}</Text>
-            </View>
-            <Text style={styles.rightText}>₹ {data?.price}</Text>
-          </View>
-        </View>
-
-        {/* Extra Details Section (UPDATED) */}
-        <View style={styles.detailsCard}>
-          <View style={styles.sectionTitleRow}>
-            <View style={{ flexDirection: "row", alignItems: "center" }}>
-              <Text style={styles.sectionTitle}>Details</Text>
-              <TouchableOpacity
-                onPress={() => navigation.pop(3)}
-                style={{ display: from == "home" ? "none" : "flex" }}
-              >
-                <Image
-                  source={require("../../assets/images/save2.png")}
-                  style={{
-                    width: wp(3),
-                    height: hp(3),
-                    resizeMode: "contain",
-                    marginLeft: wp(2),
-                  }}
-                />
-              </TouchableOpacity>
-            </View>
-          </View>
-
-          {Object.entries(data?.attributes || {}).map(([key, value], index) => {
-            // Render two items per row
-            if (index % 2 === 0) {
-              const next = Object.entries(data?.attributes || {})[index + 1];
-              return (
-                <View key={key} style={styles.brandRows}>
-                  <View style={styles.brandBox}>
-                    <Text style={styles.keyText}>{formatKey(key)}</Text>
-                    <Text style={styles.valueText}>{String(value)}</Text>
-                  </View>
-                  {next && (
-                    <View style={styles.brandBox}>
-                      <Text style={styles.keyText}>{formatKey(next[0])}</Text>
-                      <Text style={styles.valueText}>{String(next[1])}</Text>
-                    </View>
-                  )}
-                </View>
-              );
-            }
-            return null;
-          })}
-          <View style={styles.sectionTitleRow}>
-            <View style={{ flexDirection: "row", alignItems: "center" }}>
-              <Text style={styles.sectionTitle}>Description</Text>
-              <TouchableOpacity
-                onPress={() => navigation.pop(1)}
-                style={{ display: from == "home" ? "none" : "flex" }}
-              >
-                <Image
-                  source={require("../../assets/images/save2.png")}
-                  style={{
-                    width: wp(3),
-                    height: hp(3),
-                    resizeMode: "contain",
-                    marginLeft: wp(2),
-                  }}
-                />
-              </TouchableOpacity>
-            </View>
-          </View>
-
-          <View style={styles.textRow}>
-            <Text style={styles.valueTextBottom}>{data?.description}</Text>
-          </View>
-
-          {/* Bottom full width image */}
-        </View>
-        {data?.images?.map((item) => (
-          <Image
-            source={{ uri: IMAGE_BASE_URL + item }}
-            style={styles.fullWidthImage}
+          <Ionicons
+            name="chevron-forward"
+            size={22}
+            color="#6C63FF"
+            style={styles.sellerArrow}
           />
-        ))}
-        {data?.supersubcategory?.parent?.parentCategory?.id == 4 &&
-          <NearByScreen />
-        }
-        {
-          data?.supersubcategory?.parent?.parentCategory?.id == 5 && <NearByScreen />
-        }
+        </TouchableOpacity>
+
+        <View
+          ref={sellerMarkerRef}
+          collapsable={false}
+          onLayout={measureScrollThresholds}
+          style={styles.sellerMarker}
+        />
+
+        {/* Product summary */}
+        <View style={styles.productSummary}>
+          <View style={styles.categoryMetaRow}>
+            <View style={styles.categoryMetaLeft}>
+              {categoryImage ? (
+                <Image
+                  source={{ uri: IMAGE_BASE_URL + categoryImage }}
+                  style={styles.categoryMetaIcon}
+                />
+              ) : null}
+              <Text style={styles.categoryMetaText}>{categoryName}</Text>
+            </View>
+            <Text style={styles.categoryMetaDate}>
+              {formatDate(data?.createdAt) || "—"}
+            </Text>
+          </View>
+
+          <View style={styles.productTitleRow}>
+            <Text style={styles.productTitle} numberOfLines={2}>
+              {data?.name}
+            </Text>
+            <Text style={styles.productPrice}>₹ {formattedPrice}</Text>
+          </View>
+        </View>
+
+        <View style={styles.tabContent}>
+          {activeTab === "Details" && (
+            <View style={styles.detailsCard}>
+              <Text style={styles.detailsHeading}>Details</Text>
+
+              {gridAttributes.length > 0 && (
+                <View style={styles.attrIconGrid}>
+                  {gridAttributes.map(([key, value]) => (
+                    <View key={key} style={styles.attrGridItem}>
+                      <MaterialCommunityIcons
+                        name={getAttributeIcon(key) as any}
+                        size={hp(3.2)}
+                        color="#333333"
+                      />
+                      <Text style={styles.attrGridValue} numberOfLines={2}>
+                        {String(value)}
+                      </Text>
+                    </View>
+                  ))}
+                </View>
+              )}
+
+              {attributeEntries.map(([key, value], index) => {
+                if (index % 2 !== 0) return null;
+                const next = attributeEntries[index + 1];
+                return (
+                  <View key={key} style={styles.specRow}>
+                    <View style={styles.specCol}>
+                      <Text style={styles.keyText}>{formatKey(key)}</Text>
+                      <Text style={styles.valueText}>{String(value)}</Text>
+                    </View>
+                    {next && (
+                      <View style={styles.specCol}>
+                        <Text style={styles.keyText}>{formatKey(next[0])}</Text>
+                        <Text style={styles.valueText}>{String(next[1])}</Text>
+                      </View>
+                    )}
+                  </View>
+                );
+              })}
+
+              {attributeEntries.length === 0 && (
+                <Text style={styles.emptyTabText}>No details available</Text>
+              )}
+            </View>
+          )}
+
+          {activeTab === "Description" && (
+            <View style={styles.detailsCard}>
+              <Text style={styles.detailsHeading}>Description</Text>
+              <Text style={styles.valueTextBottom}>{data?.description}</Text>
+              {data?.images?.map((item: string, index: number) => (
+                <Image
+                  key={`desc-img-${index}`}
+                  source={{ uri: IMAGE_BASE_URL + item }}
+                  style={styles.fullWidthImage}
+                />
+              ))}
+            </View>
+          )}
+
+          {activeTab === "Nearby" && showNearbyTab && (
+            <View style={styles.detailsCard}>
+              <NearByScreen
+                route={{
+                  params: {
+                    lat: data?.location?.latitude ?? data?.location?.lat,
+                    lng: data?.location?.longitude ?? data?.location?.lng,
+                  },
+                }}
+              />
+            </View>
+          )}
+        </View>
+        </View>
         {/* <Image
           source={require("../../assets/images/slidecar.png")}
           style={styles.fullWidthImage}
@@ -544,14 +803,11 @@ const AddReviewScreen: React.FC = () => {
         <ScrollView
           horizontal
           showsHorizontalScrollIndicator={false}
-          style={{ marginTop: hp(2), paddingBottom: 5, marginHorizontal:hp(1) }}
+          style={{ marginTop: hp(2), paddingBottom: 5, marginHorizontal: hp(1) }}
         >
           {similarProducts && similarProducts.length > 0 ? (
             similarProducts.map((item) => (
-              <RecentCard
-                key={item.id}
-                item={item}
-              />
+              <RecentCard key={item.id} item={item} />
             ))
           ) : (
             <View style={styles.noDataContainer}>
@@ -704,16 +960,18 @@ const styles = StyleSheet.create({
     width: 30,
     height: 30,
     borderRadius: 15,
-    backgroundColor: "transparent",
+    backgroundColor: "#fff",
     justifyContent: "center",
     alignItems: "center",
     marginHorizontal: 8,
     marginVertical: 5,
-    shadowOpacity: 0,
-    shadowRadius: 0,
-    elevation: 0,
-    borderWidth: 0,
-    borderColor: "transparent",
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 3,
+    // elevation: 3,
+    borderWidth: 1,
+    borderColor: "#f0f0f0",
   },
   subtitleSection: {
     paddingHorizontal: wp("4%"),
@@ -740,6 +998,181 @@ const styles = StyleSheet.create({
     marginLeft: wp("1%"),
   },
 
+  heroSection: {
+    width: "100%",
+    height: hp(32),
+    position: "relative",
+    marginBottom: hp(0.5),
+    overflow: "hidden",
+    borderBottomLeftRadius: wp(5),
+    borderBottomRightRadius: wp(5),
+  },
+  heroImage: {
+    width,
+    height: hp(32),
+    resizeMode: "cover",
+  },
+  heroTopBar: {
+    position: "absolute",
+    top: 0,
+    left: 0,
+    right: 0,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingHorizontal: wp(4),
+    zIndex: 10,
+  },
+  heroTopRight: {
+    flexDirection: "row",
+    alignItems: "center",
+  },
+  heroCircleBtn: {
+    width: wp(10),
+    height: wp(10),
+    borderRadius: wp(5),
+    backgroundColor: "#FFFFFF",
+    alignItems: "center",
+    justifyContent: "center",
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.12,
+    shadowRadius: 3,
+    elevation: 3,
+  },
+  pageBadge: {
+    position: "absolute",
+    bottom: hp(2.8),
+    alignSelf: "center",
+    left: 0,
+    right: 0,
+    alignItems: "center",
+  },
+  pageBadgeText: {
+    backgroundColor: "rgba(0,0,0,0.45)",
+    color: "#FFFFFF",
+    fontSize: hp(1.5),
+    paddingHorizontal: wp(3),
+    paddingVertical: hp(0.4),
+    borderRadius: wp(3),
+    overflow: "hidden",
+  },
+  statsActionRow: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    paddingTop: hp(1.5),
+    paddingBottom: hp(1),
+    paddingHorizontal: wp(3),
+  },
+  statActionItem: {
+    alignItems: "center",
+    width: wp(15),
+    marginRight: wp(1),
+  },
+  statActionCircle: {
+    width: wp(11),
+    height: wp(11),
+    borderRadius: wp(5.5),
+    borderWidth: 1,
+    borderColor: "#E8E8E8",
+    backgroundColor: "#FFFFFF",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  statActionLabel: {
+    fontSize: hp(1.35),
+    color: "#000",
+    marginTop: hp(0.6),
+    fontFamily: "Poppins-Medium",
+    textAlign: "center",
+    width: "100%",
+  },
+  statActionLabelBlue: {
+    color: "#6C63FF",
+  },
+  statActionLabelRed: {
+    color: "#FF0303",
+  },
+  sellerCard: {
+    position: "relative",
+    flexDirection: "row",
+    alignItems: "center",
+    marginHorizontal: wp(4),
+    marginBottom: hp(2),
+    paddingVertical: hp(1.8),
+    paddingLeft: wp(3.5),
+    paddingRight: wp(3),
+    paddingTop: hp(2.2),
+    backgroundColor: "#FFFFFF",
+    borderRadius: wp(4),
+    borderWidth: 1,
+    borderColor: "#E8E8E8",
+    overflow: "visible",
+  },
+  sellerAvatar: {
+    width: wp(13),
+    height: wp(13),
+    borderRadius: wp(6.5),
+    marginRight: wp(3),
+  },
+  sellerInfo: {
+    flex: 1,
+    justifyContent: "center",
+    paddingRight: wp(2),
+  },
+  sellerNameRow: {
+    flexDirection: "row",
+    alignItems: "center",
+  },
+  sellerName: {
+    fontSize: hp(2),
+    fontWeight: "700",
+    color: "#000",
+    fontFamily: "Poppins-SemiBold",
+    flexShrink: 1,
+  },
+  verifiedIcon: {
+    width: hp(2.1),
+    height: hp(2.1),
+    marginLeft: wp(1.5),
+    resizeMode: "contain",
+  },
+  ownerLabel: {
+    fontSize: hp(1.45),
+    color: "#888888",
+    marginLeft: wp(2),
+    fontFamily: "Poppins-Regular",
+  },
+  sellerLocationRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginTop: hp(0.6),
+  },
+  sellerLocationText: {
+    fontSize: hp(1.45),
+    color: "#888888",
+    marginLeft: wp(1),
+    flex: 1,
+  },
+  sellerArrow: {
+    alignSelf: "center",
+  },
+  sellerBadge: {
+    position: "absolute",
+    top: 0,
+    right: 0,
+    backgroundColor: "#6C63FF",
+    paddingHorizontal: wp(3.5),
+    paddingVertical: hp(0.55),
+    borderTopRightRadius: wp(4),
+    borderBottomLeftRadius: wp(2.5),
+    zIndex: 2,
+  },
+  sellerBadgeText: {
+    color: "#FFFFFF",
+    fontSize: hp(1.35),
+    fontFamily: "Poppins-SemiBold",
+  },
   sliderWrapper: {
     width: "100%",
     height: hp("25%"),
@@ -814,40 +1247,268 @@ const styles = StyleSheet.create({
     marginLeft: wp("1%"),
   },
 
-  detailsCard: {
-    marginTop: hp("2%"),
-    marginHorizontal: wp("4%"),
-    backgroundColor: "#fff",
-    marginBottom: hp(1),
+  productSummary: {
+    marginHorizontal: wp(6),
+    marginBottom: hp(2),
+    paddingTop: hp(0.5),
   },
-  detailRowCustom: {
+  categoryMetaRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginBottom: hp(1.2),
+  },
+  categoryMetaLeft: {
+    flexDirection: "row",
+    alignItems: "center",
+    flex: 1,
+    paddingRight: wp(2),
+  },
+  categoryMetaIcon: {
+    width: wp(5.5),
+    height: wp(5.5),
+    resizeMode: "contain",
+    marginRight: wp(2),
+  },
+  categoryMetaText: {
+    fontSize: hp(1.55),
+    color: "#888888",
+    fontFamily: "Poppins-Regular",
+    flexShrink: 1,
+  },
+  categoryMetaDate: {
+    fontSize: hp(1.55),
+    color: "#000000",
+    fontFamily: "Poppins-Medium",
+  },
+  productTitleRow: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    justifyContent: "space-between",
+  },
+  productTitle: {
+    flex: 1,
+    fontSize: hp(2.1),
+    color: "#555555",
+    fontFamily: "Poppins-Medium",
+    paddingRight: wp(3),
+  },
+  productPrice: {
+    fontSize: hp(2.2),
+    fontWeight: "700",
+    color: "#000000",
+    fontFamily: "Poppins-Bold",
+  },
+
+  sellerMarker: {
+    height: 1,
+  },
+  stickyHeader: {
+    position: "absolute",
+    top: 0,
+    left: 0,
+    right: 0,
+    zIndex: 100,
+    backgroundColor: "#fff",
+    borderBottomWidth: 1,
+    borderBottomColor: "#EEEEEE",
+    elevation: 4,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.08,
+    shadowRadius: 4,
+  },
+  stickySearchRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: wp(4),
+    paddingBottom: hp(0.8),
+    gap: wp(2.5),
+  },
+  stickySearchInputWrap: {
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#F5F5F5",
+    borderRadius: wp(6),
+    paddingHorizontal: wp(3),
+    height: hp(4.5),
+    borderWidth: 1,
+    borderColor: "#E8E8E8",
+  },
+  stickySearchInput: {
+    flex: 1,
+    fontSize: hp(1.6),
+    color: "#333",
+    marginLeft: wp(2),
+    paddingVertical: 0,
+  },
+  stickyMicIcon: {
+    width: wp(4),
+    height: wp(4),
+    resizeMode: "contain",
+  },
+  stickySearchDivider: {
+    width: 1.3,
+    height: 22,
+    backgroundColor: "#E0E0E0",
+    marginHorizontal: wp(2),
+  },
+  stickyProfileRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: wp(4),
+    paddingBottom: hp(0.8),
+  },
+  stickyProfileTouch: {
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    paddingRight: wp(2),
+  },
+  stickyAvatar: {
+    width: wp(10),
+    height: wp(10),
+    borderRadius: wp(5),
+    marginRight: wp(2.5),
+  },
+  stickyProfileInfo: {
+    flex: 1,
+    paddingRight: wp(2),
+  },
+  stickyName: {
+    fontSize: hp(1.7),
+    fontWeight: "700",
+    color: "#000",
+    maxWidth: wp(35),
+  },
+  stickyLocation: {
+    fontSize: hp(1.4),
+    color: "#888",
+  },
+  stickyNavBtn: {
+    width: wp(9),
+    height: wp(9),
+    borderRadius: wp(4.5),
+    borderWidth: 1,
+    borderColor: "#E0E0E0",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  stickyTitleRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingHorizontal: wp(4),
+    paddingBottom: hp(0.6),
+  },
+  stickyProductTitle: {
+    flex: 1,
+    fontSize: hp(1.8),
+    color: "#555",
+    fontFamily: "Poppins-Medium",
+    paddingRight: wp(3),
+  },
+  stickyProductPrice: {
+    fontSize: hp(1.9),
+    fontWeight: "700",
+    color: "#000",
+  },
+  tabBar: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: wp(4),
+    borderBottomWidth: 1,
+    borderBottomColor: "#EEEEEE",
+    marginBottom: hp(0.5),
+  },
+  tabBarSticky: {
+    marginBottom: 0,
+    paddingBottom: hp(0.3),
+  },
+  tabItem: {
+    marginRight: wp(6),
+    paddingVertical: hp(1),
+    position: "relative",
+  },
+  tabText: {
+    fontSize: hp(1.7),
+    color: "#999",
+    fontFamily: "Poppins-Regular",
+  },
+  tabTextActive: {
+    color: "#000",
+    fontWeight: "700",
+    fontFamily: "Poppins-Bold",
+  },
+  tabIndicator: {
+    position: "absolute",
+    bottom: 0,
+    left: 0,
+    right: 0,
+    height: 2,
+    backgroundColor: "#6C63FF",
+    borderRadius: 1,
+  },
+  scrollTopBtn: {
+    marginLeft: "auto",
+    width: wp(8),
+    height: wp(8),
+    borderRadius: wp(4),
+    borderWidth: 1,
+    borderColor: "#E0E0E0",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  tabContent: {
+    minHeight: hp(20),
+  },
+  detailsHeading: {
+    fontSize: hp(2.4),
+    fontWeight: "700",
+    color: "#000",
+    marginBottom: hp(1.5),
+    fontFamily: "Poppins-Bold",
+  },
+  attrIconGrid: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    marginBottom: hp(2),
+  },
+  attrGridItem: {
+    width: "33.33%",
+    alignItems: "center",
+    paddingVertical: hp(1.2),
+    paddingHorizontal: wp(1),
+  },
+  attrGridValue: {
+    fontSize: hp(1.5),
+    fontWeight: "700",
+    color: "#000",
+    textAlign: "center",
+    marginTop: hp(0.6),
+    fontFamily: "Poppins-Bold",
+  },
+  specRow: {
     flexDirection: "row",
     justifyContent: "space-between",
-    alignItems: "center",
+    marginBottom: hp(1.5),
   },
-  leftBox: {
-    flexDirection: "row",
-    alignItems: "center",
+  specCol: {
+    width: "48%",
   },
-  detailText: {
-    fontSize: wp("3.9%"),
-    marginLeft: wp("1.5%"),
-    color: "#333",
+  emptyTabText: {
+    fontSize: hp(1.7),
+    color: "#999",
+    textAlign: "center",
+    paddingVertical: hp(3),
   },
-  rightText: {
-    fontSize: wp("3.5%"),
-    fontWeight: "600",
-    color: "#000",
-  },
-  detailTextCar: {
-    fontSize: wp("2.8%"),
-    marginLeft: wp("1.5%"),
-    color: "#00000080",
-  },
-  rightTextCar: {
-    fontSize: wp("2.8%"),
-    fontWeight: "600",
-    color: "#000",
+
+  detailsCard: {
+    marginTop: hp(0.9),
+    marginHorizontal: wp("6%"),
+    backgroundColor: "#fff",
+    marginBottom: hp(1),
   },
   saveimage: {
     width: wp("6%"),

@@ -228,7 +228,7 @@ const styles = StyleSheet.create({
 
   /** Profile Card Wrapper */
   profileCardWrapper: {
-    marginHorizontal: wp(4),
+    marginHorizontal: wp(1),
     marginBottom: hp(2),
     marginTop:15
   },

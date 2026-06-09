@@ -282,7 +282,8 @@ const ProductCard: React.FC<ProductCardProps> = ({
             </View>
 
             <View style={styles.profileLocationRow}>
-              <Ionicons name="location-outline" size={12} color="#FF0303" />
+              <Image source={require("../../../assets/images/map2.png")} style={{height:16,width:20, resizeMode:"contain"}} />
+              {/* <Ionicons name="location-outline" size={12} color="#FF0303" /> */}
               <Text style={styles.profileLocation} numberOfLines={1}>
                 {item.location.city}
               </Text>

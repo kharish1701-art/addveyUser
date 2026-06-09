@@ -73,7 +73,7 @@ export const shareProduct = async (id) => {
 
 
 
-export const SocialIcon = memo(({ platform, size = 28,  }) => {
+export const SocialIcon = memo(({ platform, size = 35,  }) => {
   // console.log(platform)
   // Local image mapping
   const socialIcons = {

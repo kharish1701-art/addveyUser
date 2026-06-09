@@ -1,24 +1,25 @@
 // ProfileScreenMainYou.tsx
-import React, { useCallback, useState } from "react";
+import React, { useCallback, useRef, useState } from "react";
 import { useFavorites } from "../context/FavoritesContext";
 import {
   View,
   Text,
   StyleSheet,
   Image,
-  TextInput,
   TouchableOpacity,
   ScrollView,
   Alert,
   Linking,
+  Share,
+  TextInput,
+  NativeSyntheticEvent,
+  NativeScrollEvent,
 } from "react-native";
 import {
   Ionicons,
   MaterialIcons,
   MaterialCommunityIcons,
-  FontAwesome5,
-  FontAwesome,
-  FontAwesome6,
+  Entypo,
 } from "@expo/vector-icons";
 import {
   widthPercentageToDP as wp,
@@ -30,7 +31,7 @@ import ReportModal from "../Components/Profile/ReportModal";
 import ReportDetailModal from "../Components/Profile/ReportDetailModal";
 import ProfileAddScreen from "../Components/Profile/ProfileAddScreen";
 import { useNavigation, useRoute } from "@react-navigation/native";
-import { SafeAreaView } from "react-native-safe-area-context";
+import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import { IMAGE_BASE_URL } from "../api/authApi/BaseUrl";
 import { EndPoints } from "../services/EndPoints";
 import AddCardPreview from "../Components/MainHome/AddCardPreview";
@@ -41,6 +42,11 @@ import { SocialIcon } from "../Components/CommonFunction";
 import LoadingModal from "../Components/Loader";
 
 const ProfileScreenMainYou = () => {
+  const insets = useSafeAreaInsets();
+  const scrollContentRef = useRef<View>(null);
+  const headerMarkerRef = useRef<View>(null);
+  const [stickyThreshold, setStickyThreshold] = useState(0);
+  const [showStickySearch, setShowStickySearch] = useState(false);
   const [modalVisible, setModalVisible] = useState(false);
   const [imageError, setImageError] = useState(false);
   const [coverError, setCoverError] = useState(false);
@@ -259,111 +265,152 @@ const ProfileScreenMainYou = () => {
   //       return <MaterialIcons name="link" {...iconProps} />;
   //   }
   // };
+  const coverUri = data?.images?.[0]
+    ? data.images[0].startsWith("http")
+      ? data.images[0]
+      : IMAGE_BASE_URL + data.images[0]
+    : null;
+
+  const distanceLabel =
+    data?.distance != null ? `${data.distance}` : "1.2";
+
+  const socialLinks = data?.creator?.profile?.socialLinks ?? [];
+
+  const measureStickyThreshold = useCallback(() => {
+    if (!scrollContentRef.current || !headerMarkerRef.current) return;
+
+    headerMarkerRef.current.measureLayout(
+      scrollContentRef.current,
+      (_x, y) => {
+        setStickyThreshold(y);
+      },
+      () => {}
+    );
+  }, []);
+
+  const handleScroll = useCallback(
+    (event: NativeSyntheticEvent<NativeScrollEvent>) => {
+      const scrollY = event.nativeEvent.contentOffset.y;
+      const shouldShow =
+        stickyThreshold > 0 && scrollY >= stickyThreshold - insets.top - hp(0.3);
+      setShowStickySearch((prev) =>
+        prev === shouldShow ? prev : shouldShow
+      );
+    },
+    [stickyThreshold, insets.top]
+  );
+
+  const handleShare = async () => {
+    try {
+      await Share.share({
+        message: `Check out ${data?.creator?.profile?.name}'s profile on Addvey`,
+      });
+    } catch (error: any) {
+      Alert.alert("Error", error?.message || "Could not share");
+    }
+  };
+
+  const renderStatAction = (
+    key: string,
+    icon: React.ReactNode,
+    label: string,
+    onPress?: () => void,
+    labelStyle?: object
+  ) => (
+    <TouchableOpacity
+      key={key}
+      style={styles.statActionItem}
+      activeOpacity={onPress ? 0.75 : 1}
+      onPress={onPress}
+      disabled={!onPress}
+    >
+      <View style={styles.statActionCircle}>{icon}</View>
+      <Text style={[styles.statActionLabel, labelStyle]} numberOfLines={1}>
+        {label}
+      </Text>
+    </TouchableOpacity>
+  );
+
   return (
-    <SafeAreaView style={styles.container}>
-      {/* Top Bar */}
+    <SafeAreaView style={styles.container} edges={["bottom"]}>
       {loading && <LoadingModal />}
-      <View style={styles.topBar}>
-        <TouchableOpacity onPress={() => navigation.goBack()}>
-          <MaterialIcons name="arrow-back-ios" size={16} color="#FF0303" />
-        </TouchableOpacity>
 
-        <TouchableOpacity
-          style={styles.searchContainer}
-          onPress={() => navigation.navigate("BuySellSearch")}
-        >
-          <Ionicons
-            name="search"
-            size={hp(2)}
-            color="#999"
-            style={styles.searchIcon}
-          />
-          <TextInput
-            placeholder="Search here"
-            placeholderTextColor="#999"
-            style={styles.searchInput}
-            editable={false}
-          />
-          <Image
-            source={require("../../assets/images/mic.png")}
-            style={styles.micImage}
-          />
-        </TouchableOpacity>
+      {showStickySearch && (
+        <View style={[styles.stickySearchBar, { paddingTop: insets.top + hp(0.5) }]}>
+          <TouchableOpacity onPress={() => navigation.goBack()}>
+            <MaterialIcons name="arrow-back-ios" size={16} color="#FF0303" />
+          </TouchableOpacity>
 
-        <TouchableOpacity onPress={() => navigation.navigate("QRCodeScanner")}>
-          <MaterialIcons name="qr-code-scanner" size={wp("7%")} color="black" />
-        </TouchableOpacity>
-      </View>
-
-      <ScrollView showsVerticalScrollIndicator={false}>
-        {/* Location Section */}
-        <View style={styles.locationContainer}>
-          <View style={styles.locationLeft}>
-            <Ionicons
-              name="location-outline"
-              size={hp(1.4)}
-              color="#FF0303"
-              style={{ marginRight: wp(1) }}
+          <TouchableOpacity
+            style={styles.stickySearchInputWrap}
+            activeOpacity={0.9}
+            onPress={() => navigation.navigate("BuySellSearch")}
+          >
+            <Ionicons name="search" size={hp(2)} color="#999" />
+            <TextInput
+              placeholder="Search here"
+              placeholderTextColor="#999"
+              style={styles.stickySearchInput}
+              editable={false}
+              pointerEvents="none"
             />
-            <Text style={styles.locationText}>
-              <Text style={{ color: "#6C63FF" }}>1.2 </Text> km away ·{" "}
-              {data?.location?.city}
-
-            </Text>
-          </View>
-
-          <TouchableOpacity style={styles.shareButton} onPress={() => openMaps()}>
-            <MaterialCommunityIcons
-              name="navigation-variant"
-              size={18}
-              color="#6C63FF"
+            <Image
+              source={require("../../assets/images/mic.png")}
+              style={styles.stickyMicImage}
             />
           </TouchableOpacity>
-        </View>
 
-        {/* Cover Image */}
-        <View style={styles.coverContainer}>
+          <TouchableOpacity onPress={() => navigation.navigate("QRCodeScanner")}>
+            <MaterialIcons name="qr-code-scanner" size={wp("7%")} color="black" />
+          </TouchableOpacity>
+        </View>
+      )}
+
+      <ScrollView
+        showsVerticalScrollIndicator={false}
+        onScroll={handleScroll}
+        scrollEventThrottle={16}
+      >
+        <View
+          ref={scrollContentRef}
+          collapsable={false}
+          onLayout={measureStickyThreshold}
+        >
+        {/* Hero cover with floating controls */}
+        <View style={styles.heroSection}>
           <Image
-            source={{
-              uri: data?.images[0]?.startsWith("http")
-                ? data.images[0]
-                : IMAGE_BASE_URL + data?.images[0],
-            }}
+            source={
+              coverUri
+                ? { uri: coverUri }
+                : require("../../assets/images/slidbike.jpeg")
+            }
             style={styles.coverImage}
           />
 
-          {/* Stats Overlay */}
-          <View style={styles.overlayIcons}>
-            <View style={styles.overlayItem}>
-              <Ionicons name="people-outline" size={hp(2)} color="#fff" />
-              <Text style={styles.overlayText}>{data?.views}</Text>
-            </View>
-            <TouchableOpacity style={styles.overlayItem} onPress={handleFavoritePress}>
-              <Ionicons
-                name={isFavorite(data?.id) ? "heart" : "heart-outline"}
-                size={hp(2)}
-                color={isFavorite(data?.id) ? "red" : "#fff"}
-              />
-              <Text style={styles.overlayText}>{likesCount}</Text>
+          <View style={[styles.heroTopBar, { paddingTop: insets.top + hp(0.8) }]}>
+            <TouchableOpacity
+              style={styles.heroCircleBtn}
+              onPress={() => navigation.goBack()}
+            >
+              <Ionicons name="chevron-back" size={22} color="#000" />
             </TouchableOpacity>
-            <View style={styles.overlayItem}>
-              <Ionicons name="share-outline" size={hp(2)} color="#fff" />
-              <Text style={styles.overlayText}>{data?.shares}</Text>
+
+            <View style={styles.heroTopRight}>
+              <TouchableOpacity
+                style={[styles.heroCircleBtn, { marginRight: wp(2.5) }]}
+                onPress={() => navigation.navigate("QRCodeScanner")}
+              >
+                <MaterialIcons name="qr-code-scanner" size={22} color="#000" />
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.heroCircleBtn}
+                onPress={() => navigation.navigate("BuySellSearch")}
+              >
+                <Ionicons name="search" size={22} color="#000" />
+              </TouchableOpacity>
             </View>
           </View>
 
-          <TouchableOpacity
-            style={styles.infoIconContainer}
-            onPress={() => setModalVisible(true)}
-          >
-            <Ionicons
-              name="information-circle-outline"
-              size={hp(3)}
-              color="#fff"
-            />
-          </TouchableOpacity>
-
-          {/* Modal */}
           <ProfileInfoModal
             visible={modalVisible}
             onClose={() => setModalVisible(false)}
@@ -387,12 +434,12 @@ const ProfileScreenMainYou = () => {
 
           <Image
             source={
-              (data?.creator?.profile?.image && !imageError)
+              data?.creator?.profile?.image && !imageError
                 ? {
-                  uri: data.creator.profile.image.startsWith("http")
-                    ? data.creator.profile.image
-                    : IMAGE_BASE_URL + data.creator.profile.image,
-                }
+                    uri: data.creator.profile.image.startsWith("http")
+                      ? data.creator.profile.image
+                      : IMAGE_BASE_URL + data.creator.profile.image,
+                  }
                 : require("../../assets/images/slidbike.jpeg")
             }
             style={styles.profileImage}
@@ -402,51 +449,126 @@ const ProfileScreenMainYou = () => {
 
         {/* User Info */}
         <View style={styles.infoContainer}>
-          {/* Name Row */}
-          <View style={styles.nameActionRow}>
-            <View style={styles.nameRow}>
-              <Text style={styles.name}>{data?.creator?.profile?.name}</Text>
-              <Image
-                source={require("../../assets/images/save.png")}
-                style={styles.verifiedIcon}
-              />
-            </View>
-          </View>
-
-          <View style={styles.actionsBelowName}>
-            <View style={styles.actionsRight}>
-              <TouchableOpacity
-                onPress={() => openWhatsApp(data?.creator?.phone, data?.name)}
-              >
+          <View style={styles.nameFollowRow}>
+            <View style={styles.nameBlock}>
+              <View style={styles.nameRow}>
+                <Text style={styles.name}>{data?.creator?.profile?.name}</Text>
                 <Image
-                  source={require("../../assets/images/wts.png")}
-                  style={styles.whatsappImage}
+                  source={require("../../assets/images/save.png")}
+                  style={styles.verifiedIcon}
                 />
-              </TouchableOpacity>
-
-              <TouchableOpacity
-                style={styles.iconBtn}
-                onPress={() => {
-                  openDialPad(data?.creator?.phone);
-                }}
-              >
-                <Ionicons name="call" size={hp(1.8)} color="#6C63FF" />
-              </TouchableOpacity>
-
-              <TouchableOpacity
-                style={styles.unfollowBtn}
-                onPress={() => followPress()}
-              >
-                <Text style={styles.unfollowText}>
-                  {isFollow ? "Unfollow" : "Follow"}
+              </View>
+              <View style={styles.locationRow}>
+                <Entypo name="location-pin" size={wp(5)} color="#FF0303" />
+                <Text style={styles.locationText}>
+                  {distanceLabel} km away . {data?.location?.city}
                 </Text>
-              </TouchableOpacity>
+              </View>
             </View>
+
+            <TouchableOpacity
+              style={styles.unfollowBtn}
+              onPress={() => followPress()}
+            >
+              <Text style={styles.unfollowText}>
+                {isFollow ? "Unfollow" : "Follow"}
+              </Text>
+            </TouchableOpacity>
           </View>
 
-          <Text style={styles.phoneText}>
+          <View
+            ref={headerMarkerRef}
+            onLayout={measureStickyThreshold}
+            collapsable={false}
+            style={styles.headerScrollMarker}
+          />
+
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={styles.statsActionRow}
+          >
+            {renderStatAction(
+              "views",
+              <Ionicons name="eye-outline" size={hp(2.2)} color="#000" />,
+              String(data?.views ?? 0)
+            )}
+            {renderStatAction(
+              "likes",
+              <Ionicons
+                name={isFavorite(data?.id) ? "heart" : "heart-outline"}
+                size={hp(2.2)}
+                color="#FF0303"
+              />,
+              String(likesCount),
+              handleFavoritePress
+            )}
+            {renderStatAction(
+              "shares",
+              <Ionicons name="share-social-outline" size={hp(2.2)} color="#6C63FF" />,
+              String(data?.shares ?? 0),
+              handleShare
+            )}
+            {renderStatAction(
+              "distance",
+              <MaterialCommunityIcons
+                name="navigation-variant"
+                size={hp(2.2)}
+                color="#6C63FF"
+              />,
+              `${distanceLabel} km`,
+              openMaps,
+              styles.statActionLabelBlue
+            )}
+            {renderStatAction(
+              "report",
+              <Ionicons name="warning-outline" size={hp(2.2)} color="#FF0303" />,
+              "Report",
+              () => setReportModalVisible(true),
+              styles.statActionLabelRed
+            )}
+            {socialLinks.map((link: any, index: number) =>
+              renderStatAction(
+                `social-${index}`,
+                <SocialIcon platform={link.platform} size={hp(2.4)} />,
+                link.platform,
+                () => handleSocialLinkPress(link.url),
+                styles.statActionLabelMuted
+              )
+            )}
+            {renderStatAction(
+              "whatsapp",
+              <Image
+                source={require("../../assets/images/wts.png")}
+                style={styles.statWhatsappIcon}
+              />,
+              "WhatsApp",
+              () => openWhatsApp(data?.creator?.phone, data?.name),
+              styles.statActionLabelMuted
+            )}
+            {renderStatAction(
+              "call",
+              <Ionicons name="call" size={hp(2.2)} color="#6C63FF" />,
+              "Call",
+              () => openDialPad(data?.creator?.phone),
+              styles.statActionLabelBlue
+            )}
+            {renderStatAction(
+              "info",
+              <Ionicons
+                name="information-circle-outline"
+                size={hp(2.2)}
+                color="#6C63FF"
+              />,
+              "Info",
+              () => setModalVisible(true),
+              styles.statActionLabelBlue
+            )}
+          </ScrollView>
+
+          {/* <Text style={styles.phoneText}>
             Phone no: {data?.creator?.phone}, {data?.creator?.email}
-          </Text>
+          </Text> */}
 
           <View style={styles.row}>
             <MaterialIcons
@@ -473,50 +595,10 @@ const ProfileScreenMainYou = () => {
             </Text>
           </Text>
 
-          <View style={styles.gallerySection}>
-            <Text style={styles.galleryLabel}>Follow us</Text>
-            <View style={styles.galleryImages}>
-              {data?.creator?.profile?.socialLinks?.map((link, index) => (
-                <View style={styles.galleryItem}>
-                  <TouchableOpacity
-                    key={index}
-                    style={styles.socialIconButton}
-                    onPress={() => handleSocialLinkPress(link.url)}
-                  >
-                    <SocialIcon platform={link.platform} />
-                    {/* {getSocialIcon(link.platform)} */}
-                  </TouchableOpacity>
-                  <Text style={styles.galleryText}>{link.platform}</Text>
-                </View>
-              ))}
-
-              {/* <TouchableOpacity style={styles.galleryItem} onPress={()=>{data?.creator?.profile?.socialLinks?.includes('youtube') && Alert.alert('hiii')}}>
-                                <Image
-                                    source={require("../../assets/images/youtubeimg.png")}
-                                    style={styles.galleryImage}
-                                />
-                                <Text style={styles.galleryText}>Youtube</Text>
-                            </TouchableOpacity>
-                            <View style={styles.galleryItem}>
-                                <Image
-                                    source={require("../../assets/images/facebook.png")}
-                                    style={styles.galleryImage}
-                                />
-                                <Text style={styles.galleryText}>Facebook</Text>
-                            </View>
-                            <View style={styles.galleryItem}>
-                                <Image
-                                    source={require("../../assets/images/insta.png")}
-                                    style={styles.galleryImage}
-                                />
-                                <Text style={styles.galleryText}>Instagram</Text>
-                            </View> */}
-            </View>
-          </View>
         </View>
+        
         <ProfileAddScreen id={data?.creator?.id} />
-        {/* <AddCardPreview  type={'filter'} EndpointUrl={EndPoints.getProduct}/> */}
-        {/* <ProfileAddScreen /> */}
+        </View>
       </ScrollView>
     </SafeAreaView>
   );
@@ -529,189 +611,215 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: "#fff",
   },
-  topBar: {
+  stickySearchBar: {
+    position: "absolute",
+    top: 0,
+    left: 0,
+    right: 0,
+    zIndex: 100,
+    elevation: 100,
     flexDirection: "row",
     alignItems: "center",
-    justifyContent: "space-between",
     paddingHorizontal: wp(4),
-    paddingVertical: hp(1),
-    marginTop: hp(1),
+    paddingBottom: hp(1),
+    backgroundColor: "#FFFFFF",
+    borderBottomWidth: 1,
+    borderBottomColor: "#EEEEEE",
   },
-  searchContainer: {
+  stickySearchInputWrap: {
+    flex: 1,
     flexDirection: "row",
     alignItems: "center",
     borderRadius: wp(3),
     paddingHorizontal: wp(3),
-    flex: 1,
     marginHorizontal: wp(2),
     borderColor: "#ddd",
     borderWidth: 1,
+    height: hp(5),
   },
-  searchIcon: {
-    marginRight: wp(1),
+  stickySearchInput: {
+    flex: 1,
+    fontSize: hp(1.8),
+    color: "#000",
+    marginLeft: wp(1),
   },
-  micImage: {
+  stickyMicImage: {
     width: hp(2.2),
     height: hp(2.2),
     marginLeft: wp(1),
   },
-  searchInput: {
-    flex: 1,
-    fontSize: hp(1.8),
-    color: "#000",
-  },
-
-  locationContainer: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    paddingHorizontal: wp(4),
-    marginTop: hp(1),
-    marginBottom: hp(1),
-  },
-  locationLeft: {
-    flexDirection: "row",
-    alignItems: "center",
-    flex: 1,
-  },
-  locationText: {
-    fontSize: hp(1.2),
-    color: "#6E533F",
-    flexShrink: 1,
-  },
-  shareButton: {
-    backgroundColor: "#fff",
-    borderRadius: wp(5),
-    padding: hp(0.5),
-    borderWidth: 1,
-    borderColor: "#ddd",
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.2,
-    shadowRadius: 2,
-    elevation: 4,
-  },
-
-  coverContainer: {
+  headerScrollMarker: {
+    height: 1,
     width: "100%",
-    height: hp(25),
-    marginTop: hp(1),
+  },
+  heroSection: {
+    width: "100%",
+    height: hp(28),
     position: "relative",
+    marginBottom: hp(3),
   },
   coverImage: {
     width: "100%",
-    height: "90%",
-    borderRadius: wp(2),
+    height: "100%",
+    borderBottomLeftRadius: wp(5),
+    borderBottomRightRadius: wp(5),
   },
-  overlayIcons: {
+  heroTopBar: {
     position: "absolute",
-    right: wp(4),
-    top: hp(1),
+    top: 0,
+    left: 0,
+    right: 0,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingHorizontal: wp(4),
+    zIndex: 10,
+  },
+  heroTopRight: {
     flexDirection: "row",
     alignItems: "center",
   },
-  overlayItem: {
+  heroCircleBtn: {
+    width: wp(10),
+    height: wp(10),
+    borderRadius: wp(5),
+    backgroundColor: "#FFFFFF",
+    alignItems: "center",
+    justifyContent: "center",
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.12,
+    shadowRadius: 3,
+    elevation: 3,
+  },
+  locationText: {
+    fontSize: hp(1.7),
+    color: "#6E533F",
+    marginLeft: wp(1),
+    flexShrink: 1,
+  },
+  locationRow: {
     flexDirection: "row",
     alignItems: "center",
-    marginLeft: wp(2),
-    backgroundColor: "#00000021",
-    paddingHorizontal: wp(1),
-    paddingVertical: hp(0.2),
-    borderRadius: 10,
+    marginTop: hp(0.4),
   },
-  overlayText: {
-    color: "#fff",
-    marginLeft: wp(0.5),
-    fontSize: hp(1.6),
+  statsActionRow: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    paddingTop: hp(2),
+    paddingBottom: hp(0.5),
+    paddingRight: wp(2),
   },
-  infoIconContainer: {
-    position: "absolute",
-    right: wp(3),
-    bottom: hp(3.5),
+  statActionItem: {
+    alignItems: "center",
+    width: wp(15),
+    marginRight: wp(1),
+  },
+  statActionCircle: {
+    width: wp(11),
+    height: wp(11),
+    borderRadius: wp(5.5),
+    borderWidth: 1,
+    borderColor: "#E8E8E8",
+    backgroundColor: "#FFFFFF",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  statActionLabel: {
+    fontSize: hp(1.35),
+    color: "#000",
+    marginTop: hp(0.6),
+    fontFamily: "Poppins-Medium",
+    textAlign: "center",
+    width: "100%",
+  },
+  statActionLabelBlue: {
+    color: "#6C63FF",
+  },
+  statActionLabelRed: {
+    color: "#FF0303",
+  },
+  statActionLabelMuted: {
+    color: "#888",
+    textTransform: "lowercase",
   },
   profileImage: {
-    width: wp(16),
-    height: wp(16),
-    borderRadius: wp(10),
+    width: wp(18),
+    height: wp(18),
+    borderRadius: wp(9),
     position: "absolute",
     left: wp(5),
-    bottom: -hp(1),
+    bottom: -hp(4),
+    borderWidth: 3,
+    borderColor: "#FFFFFF",
   },
   socialIconButton: {
     width: 30,
     height: 30,
     borderRadius: 15,
-    backgroundColor: "transparent",
+    backgroundColor: "#fff",
     justifyContent: "center",
     alignItems: "center",
     marginHorizontal: 8,
     marginVertical: 5,
-    shadowOpacity: 0,
-    shadowRadius: 0,
-    elevation: 0,
-    borderWidth: 0,
-    borderColor: "transparent",
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 3,
+    // elevation: 3,
+    borderWidth: 1,
+    borderColor: "#f0f0f0",
   },
   infoContainer: {
-    marginTop: hp(2),
+    marginTop: hp(1),
     paddingHorizontal: wp(5),
+    paddingBottom: hp(1),
   },
-
-  nameActionRow: {
+  nameFollowRow: {
     flexDirection: "row",
+    marginTop: hp(1),
+    alignItems: "flex-start",
     justifyContent: "space-between",
-    alignItems: "center",
+  },
+  nameBlock: {
+    flex: 1,
+    paddingRight: wp(2),
   },
   nameRow: {
     flexDirection: "row",
     alignItems: "center",
   },
   name: {
-    fontSize: hp(2),
+    fontSize: hp(2.5),
     color: "#000",
-    fontFamily: "Poppins-Medium",
+    fontFamily: "Poppins-SemiBold",
+    fontWeight: "700",
   },
   verifiedIcon: {
-    width: hp(2),
-    height: hp(2),
-    marginLeft: wp(1),
+    width: hp(2.2),
+    height: hp(2.2),
+    marginLeft: wp(1.8),
     resizeMode: "contain",
   },
-
-  actionsBelowName: {
-    width: "100%",
-    alignItems: "flex-end",
-    marginTop: hp(0.5),
-  },
-  actionsRight: {
-    flexDirection: "row",
-    alignItems: "center",
-  },
-  whatsappImage: {
-    width: hp(4),
-    height: hp(4),
+  statWhatsappIcon: {
+    width: hp(2.6),
+    height: hp(2.6),
     resizeMode: "contain",
-    marginLeft: wp(2),
-  },
-  iconBtn: {
-    padding: hp(0.7),
-    borderRadius: wp(10),
-    marginLeft: wp(2),
-    borderColor: "#6C63FF",
-    borderWidth: 1,
   },
   unfollowBtn: {
-    borderWidth: 1,
+    borderWidth: 1.5,
     borderColor: "#6C63FF",
-    paddingVertical: hp(0.7),
-    paddingHorizontal: wp(4),
-    borderRadius: wp(5),
-    marginLeft: wp(2),
+    paddingVertical: hp(1),
+    paddingHorizontal: wp(6),
+    borderRadius: wp(6),
+    backgroundColor: "#fff",
+    marginTop: hp(0.2),
   },
   unfollowText: {
     color: "#6C63FF",
-    fontWeight: "600",
-    fontSize: hp(1.5),
+    fontWeight: "800",
+    fontSize: hp(2),
+    fontFamily: "Poppins-Bold",
   },
 
   phoneText: {
